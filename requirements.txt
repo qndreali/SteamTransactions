@@ -1,0 +1,6 @@
+altair==5.4.1
+mysqlclient==2.2.4
+mysql-connector-python==9.1.0
+pandas==2.2.3
+SQLAlchemy==2.0.35
+streamlit-aggrid==1.0.5
