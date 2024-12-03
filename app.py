@@ -189,7 +189,6 @@ def log_transaction(action, node, query, params):
         }
         with open(LOG_FILE, "a") as log_file:
             log_file.write(json.dumps(log_entry) + "\n")
-        st.write(f"Transaction logged: {log_entry}")
     except Exception as e:
         st.error(f"Error logging transaction: {e}")
         raise
@@ -537,11 +536,26 @@ def update():
                         conn3.commit()
                         log_transaction("DELETE", "Node 3", "DELETE FROM games WHERE game_id = %s", (int(game_id),))
 
+                    elif (int(original_year) and updated_year) >= 2010 or (int(original_year) and updated_year) < 2010:
+                        conn1_cursor.execute(query_update, params_update)
+                        time.sleep(5)
+                        conn1.commit()
+                        log_transaction("UPDATE", "Node 1", query_update, params_update)
+                        if updated_year < 2010:
+                            conn2_cursor.execute(query_update, params_update)
+                            conn2.commit()
+                            log_transaction("UPDATE", "Node 2", query_update, params_insert)
+                        else:
+                            conn3_cursor.execute(query_update, params_update)
+                            conn3.commit()
+                            log_transaction("UPDATE", "Node 3", query_update, params_insert)
+
                     else:
                         # Update within the same node
                         print("SAD PATH")
                         if node_status["Node 1"]:
                             conn1_cursor.execute(query_update, params_update)
+                            time.sleep(5)
                             conn1.commit()
                             st.info(f"Data updated into Node 1.")
 
