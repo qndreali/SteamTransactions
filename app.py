@@ -680,7 +680,7 @@ def main():
     # Add crash simulation options to the sidebar
     crash_simulation()
 
-    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete"])
+    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete", "Report"])
 
     # Initialize or retain first selected node
     if 'first_selected_node' not in st.session_state:
@@ -710,6 +710,8 @@ def main():
         show()
     elif page == "Search":
         search()
+    elif page == "Report":
+        report()
 
     # Adjust the backup node based on the first selected node
     if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
