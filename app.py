@@ -254,6 +254,74 @@ def replicate_from_temp_logs_to_node_1():
     except Exception as e:
         st.error(f"Error during replication: {e}")
 
+
+backup_node = None
+def replicate_from_temp_logs_to_backup_node():
+    try:
+        with open(LOG_FILE, "r") as log:
+            lines = log.readlines()
+
+        if not lines:
+            return  # No logs to process
+
+        updated_logs = []
+        for line in lines:
+            try:
+                entry = json.loads(line.strip())
+                action = entry["action"]
+                node = entry["node"]
+                query = entry["query"]
+                params = entry["params"]
+
+                if action.endswith("_TEMP"):
+                    if st.session_state.get("simulate_failure_node_2or3", False):
+                        if node == "Node 2":
+                            log_transaction("REPLICATE_FAILURE", "Node 2", query, params)
+                            raise Exception("Simulated failure while replicating to Node 2 from Node 1.")
+                        else:
+                            log_transaction("REPLICATE_FAILURE", "Node 3", query, params)
+                            raise Exception("Simulated failure while replicating to Node 3 from Node 1.")
+                    attempt = 0
+                    while attempt < MAX_RETRIES:
+                        try:
+                            if action.startswith("INSERT"):
+                                cursor = conn2_cursor if node == "Node 2" else conn3_cursor
+                                cursor.execute(query, params)
+                            elif action.startswith("UPDATE"):
+                                cursor = conn2_cursor if node == "Node 2" else conn3_cursor
+                                cursor.execute(query, params)
+                            elif action.startswith("DELETE"):
+                                cursor = conn2_cursor if node == "Node 2" else conn3_cursor
+                                cursor.execute(query, params)
+
+                            conn = conn2 if node == "Node 2" else conn3
+                            conn.commit()
+                            log_transaction(action.replace("_TEMP", "_REPLICATED"), node, query, params)
+                            st.success(f"{action.replace('_TEMP', '')} operation replicated to {node} successfully.")
+                            break
+                        except Exception as e:
+                            attempt += 1
+                            if attempt < MAX_RETRIES:
+                                st.warning(f"Retrying {action} to {node} in {RETRY_DELAY} seconds... (Attempt {attempt}/{MAX_RETRIES})")
+                                time.sleep(RETRY_DELAY)
+                            else:
+                                print(f"Node status of {node}: {node_status[node]} Replicating from temp logs.")
+                                st.error(f"Failed to replicate {action} to {node} after {MAX_RETRIES} attempts: {e}")
+                                updated_logs.append(line)
+                                break
+                else:
+                    updated_logs.append(line)  # Retain logs not meant for replication to the backup node
+
+            except json.JSONDecodeError:
+                st.warning("Skipping invalid log entry.")
+                continue
+
+        with open(LOG_FILE, "w") as log:
+            log.writelines(updated_logs)
+
+    except Exception as e:
+        st.error(f"Error during replication: {e}")
+        
 def show():
     """Display all games in the database."""
     st.header("Show Games 🎮")
@@ -303,20 +371,16 @@ def insert():
 
         try:
             if node_status["Node 1"]:
-                # Insert into Node 1
+                # If Node 1 is up
+                global backup_node 
                 conn1_cursor.execute(query, params)
                 conn1.commit()
-                log_transaction("INSERT", "Node 1", query, params)
-                st.success("Game successfully inserted into Node 1.")
+                st.info(f"Data inserted into Node 1.")
 
-                # Replicate to backup node
-                backup_node = "Node 2" if year <= 2010 else "Node 3"
-                cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
-                conn = conn2 if backup_node == "Node 2" else conn3
-                cursor.execute(query, params)
-                conn.commit()
-                log_transaction("INSERT", backup_node, query, params)
-                st.success(f"Game successfully inserted into {backup_node}.")
+                # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
+                backup_node = "Node 2" if year < 2010 else "Node 3"
+                log_transaction("INSERT_TEMP", backup_node, query, params)
+                st.info(f"Will replicate to {backup_node} once it comes back online NEW")
             else:
                 # If Node 1 is down
                 backup_node = "Node 2" if year <= 2010 else "Node 3"
@@ -477,20 +541,14 @@ def update():
                         # Update within the same node
                         print("SAD PATH")
                         if node_status["Node 1"]:
-                            # Update Node 1
                             conn1_cursor.execute(query_update, params_update)
                             conn1.commit()
-                            time.sleep(5)
-                            log_transaction("UPDATE", "Node 1", query_update, params_update)
+                            st.info(f"Data updated into Node 1.")
 
-                            backup_node = "Node 2" if updated_year <=2010 else "Node 3"
-                            cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
-                            conn = conn2 if backup_node == "Node 2" else conn3
-                            cursor.execute(query_update, params_update)
-                            conn.commit()
-                            log_transaction("UPDATE", backup_node, query_update, params_update)
-                            st.success(f"Game successfully updated for {backup_node}.")
-
+                            # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
+                            backup_node = "Node 2" if updated_year < 2010 else "Node 3"
+                            log_transaction("UPDATE_TEMP", backup_node, query_update, params_update)
+                            st.warning(f"Node {backup_node} is unavailable. Will replicate update to {backup_node} once it comes back online")
                         else:
                             backup_node = "Node 2" if updated_year <= 2010 else "Node 3"
                             cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
@@ -525,9 +583,8 @@ def delete():
 
         selected_id = st.number_input("Select Game ID to Delete", min_value=1, step=1)
         game_to_delete = df[df["game_id"] == selected_id]
-
         if not game_to_delete.empty:
-            year = date_helper(game_to_delete.iloc[0]["release_date"])
+            year = int(date_helper(game_to_delete.iloc[0]["release_date"]))  # Ensure year is an integer
             query = "DELETE FROM games WHERE game_id = %s"
             params = (selected_id,)
 
@@ -538,17 +595,12 @@ def delete():
                         conn1_cursor.execute(query, params)
                         time.sleep(5)
                         conn1.commit()
-                        log_transaction("DELETE", "Node 1", query, params)
                         st.success(f"Game successfully deleted from Node 1.")
 
-                        # Replicate delete to appropriate backup node based on year
-                        backup_node = "Node 2" if int(year) <= 2010 else "Node 3"
-                        cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
-                        conn = conn2 if backup_node == "Node 2" else conn3
-                        cursor.execute(query, params)
-                        conn.commit()
-                        log_transaction("DELETE", backup_node, query, params)
-                        st.success(f"Game successfully deleted from {backup_node}.")
+                        # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
+                        backup_node = "Node 2" if year < 2010 else "Node 3"
+                        log_transaction("DELETE_TEMP", backup_node, query, params)
+                        st.info(f"Will delete from {backup_node} once it comes back online NEW")
                     else:
                         # Node 1 is unavailable, delete from backup node
                         backup_node = "Node 2" if int(year) <= 2010 else "Node 3"
@@ -564,9 +616,8 @@ def delete():
                         # Optionally trigger replication from temporary logs to Node 1 later
                         if node_status["Node 1"]:
                             replicate_from_temp_logs_to_node_1()
-
-                    # Update local DataFrame
-                    st.session_state.df = fetch_data(conn1, "SELECT * FROM games")
+                        # Update local DataFrame
+                        st.session_state.df = fetch_data(conn1, "SELECT * FROM games")
 
                 except Exception as e:
                     st.error(f"Error deleting game: {e}")
@@ -607,29 +658,49 @@ def crash_simulation():
     for node in node_status.keys():
         node_status[node] = st.sidebar.checkbox(node, value=True)
     st.sidebar.checkbox("Simulate Failure in Node 1 Replication", key="simulate_failure_node_1")
+    st.sidebar.checkbox("Simulate Failure in Node 2 or 3 Replication", key="simulate_failure_node_2or3")
 
 def main():
     st.title("Steam Games Management 🎮")
-    
+
     # Add crash simulation options to the sidebar
     crash_simulation()
 
-    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete", "Report"])
+    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete"])
 
-    if page == "Show":
-        show()
-    elif page == "Search":
-        search()
-    elif page == "Insert":
+    # Initialize or retain first selected node
+    if 'first_selected_node' not in st.session_state:
+        st.session_state.first_selected_node = None  # No node selected yet
+
+    if page == "Insert":
+        # Detect the first node click based on the checkbox states
+        if node_status["Node 1"] and st.session_state.first_selected_node is None:
+            st.session_state.first_selected_node = "Node 1"
+            print("Node 1 is first clicked")
+
+        elif node_status["Node 2"] and st.session_state.first_selected_node is None:
+            st.session_state.first_selected_node = "Node 2"
+            print("Node 2 is first clicked")
+
+        elif node_status["Node 3"] and st.session_state.first_selected_node is None:
+            st.session_state.first_selected_node = "Node 3"
+            print("Node 3 is first clicked")
+
         insert()
+
     elif page == "Update":
         update()
     elif page == "Delete":
         delete()
-    elif page == "Report":
-        report()
+    elif page == "Show":
+        show()
+    elif page == "Search":
+        search()
 
-    if node_status["Node 1"]:
+    # Adjust the backup node based on the first selected node
+    if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
+        replicate_from_temp_logs_to_backup_node()
+    elif (st.session_state.first_selected_node == "Node 2" or st.session_state.first_selected_node ==  "Node 3") and node_status["Node 1"] == True:
         replicate_from_temp_logs_to_node_1()
 
 if __name__ == "__main__":
