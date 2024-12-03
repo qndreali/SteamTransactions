@@ -108,6 +108,9 @@ def fetch_data_with_fallback(query):
 query = "SELECT * FROM games"
 df = fetch_data_with_fallback(query)
 
+if 'df' not in st.session_state:
+    st.session_state.df = df
+
 def date_helper(date):
     return date.strftime("%Y")
 
@@ -422,7 +425,7 @@ def update():
                 params_update = (
                     name, release_date, required_age, price,
                     int(windows), int(mac), int(linux), languages,
-                    developers, publishers, genres, int(game_id), 
+                    developers, publishers, genres, int(game_id),
                 )
                 query_insert = """
                     INSERT INTO games (
@@ -439,42 +442,45 @@ def update():
                 try:
                     # Node Transition Logic
                     if original_year < 2010 and updated_year >= 2010:
+                        print("HAPPY PATH")
                         # Transition from Node 2 to Node 3
+                        conn1_cursor.execute(query_update, params_update)
+                        time.sleep(5)
+                        conn1.commit()
+                        log_transaction("UPDATE", "Node 1", query_update, params_update)
+
                         conn3_cursor.execute(query_insert, params_insert)
                         conn3.commit()
                         log_transaction("INSERT", "Node 3", query_insert, params_insert)
 
-                        conn3_cursor.execute(query_update, params_update)
-                        conn3.commit()
-                        log_transaction("UPDATE", "Node 3", query_update, params_update)
-
-                        conn2_cursor.execute("DELETE FROM games WHERE game_id = %s", (game_id,))
+                        conn2_cursor.execute("DELETE FROM games WHERE game_id = %s", (int(game_id),))
                         conn2.commit()
-                        log_transaction("DELETE", "Node 2", "DELETE FROM games WHERE game_id = %s", (game_id,))
-                        st.success("Game updated in Node 3 and removed from Node 2.")
+                        log_transaction("DELETE", "Node 2", "DELETE FROM games WHERE game_id = %s", (int(game_id),))
 
-                    elif original_year >= 2010 and updated_year < 2010:
+                    elif int(original_year) >= 2010 and updated_year < 2010:
+                        print("HAPPY PATH")
                         # Transition from Node 3 to Node 2
+                        conn1_cursor.execute(query_update, params_update)
+                        time.sleep(5)
+                        conn1.commit()
+                        log_transaction("UPDATE", "Node 1", query_update, params_update)
+
                         conn2_cursor.execute(query_insert, params_insert)
                         conn2.commit()
                         log_transaction("INSERT", "Node 2", query_insert, params_insert)
 
-                        conn2_cursor.execute(query_update, params_update)
-                        conn2.commit()
-                        log_transaction("UPDATE", "Node 2", query_update, params_update)
-
-                        conn3_cursor.execute("DELETE FROM games WHERE game_id = %s", (game_id,))
+                        conn3_cursor.execute("DELETE FROM games WHERE game_id = %s", (int(game_id),))
                         conn3.commit()
-                        log_transaction("DELETE", "Node 3", "DELETE FROM games WHERE game_id = %s", (game_id,))
-                        st.success("Game updated in Node 2 and removed from Node 3.")
+                        log_transaction("DELETE", "Node 3", "DELETE FROM games WHERE game_id = %s", (int(game_id),))
 
                     else:
                         # Update within the same node
-
+                        print("SAD PATH")
                         if node_status["Node 1"]:
                             # Update Node 1
                             conn1_cursor.execute(query_update, params_update)
                             conn1.commit()
+                            time.sleep(5)
                             log_transaction("UPDATE", "Node 1", query_update, params_update)
 
                             backup_node = "Node 2" if updated_year <=2010 else "Node 3"
@@ -490,6 +496,7 @@ def update():
                             cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
                             conn = conn2 if backup_node == "Node 2" else conn3
                             cursor.execute(query_update, params_update)
+                            time.sleep(5)
                             conn.commit()
                             log_transaction("UPDATE_TEMP", backup_node, query_update, params_update)
                             log_transaction("UPDATE_TEMP", "Node 1", query_update, params_update)
@@ -503,13 +510,13 @@ def update():
 
 
 def delete():
-    global df
+    search_df = st.session_state.df
     st.header("Delete Game 🗑️")
 
     # Search for the game by ID or Name
     search_term = st.text_input("Search by Game ID or Name")
-    search_results = df[
-        (df["game_id"].astype(str) == search_term) | (df["name"].str.contains(search_term, case=False, na=False))
+    search_results = search_df[
+        (search_df["game_id"].astype(str) == search_term) | (search_df["name"].str.contains(search_term, case=False, na=False))
     ]
 
     if not search_results.empty:
@@ -529,6 +536,7 @@ def delete():
                     # Attempt deletion from Node 1
                     if node_status["Node 1"]:
                         conn1_cursor.execute(query, params)
+                        time.sleep(5)
                         conn1.commit()
                         log_transaction("DELETE", "Node 1", query, params)
                         st.success(f"Game successfully deleted from Node 1.")
@@ -547,6 +555,7 @@ def delete():
                         cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
                         conn = conn2 if backup_node == "Node 2" else conn3
                         cursor.execute(query, params)
+                        time.sleep(5)
                         conn.commit()
                         log_transaction("DELETE_TEMP", backup_node, query, params)
                         log_transaction("DELETE_TEMP", "Node 1", query, params)
@@ -566,6 +575,32 @@ def delete():
     else:
         st.warning("No results found for your search.")
 
+
+def report():
+    st.header("Game Report 📊")
+    report_df = st.session_state.df
+    total_games = report_df.shape[0]
+
+    report_df['year'] = pd.to_datetime(report_df['release_date'], errors='coerce').dt.year
+
+    before_2010 = report_df[report_df['year'] < 2010].shape[0]
+    after_2010 = report_df[report_df['year'] >= 2010].shape[0]
+
+    st.write(f"The total number of games in the database is {total_games}")
+    st.write(f"Games before 2010: {before_2010}")
+    st.write(f"Games after 2010: {after_2010}")
+
+    # Group by genre and display the count for each genre
+    st.write("### Games by Platform")
+    windows = report_df[report_df['windows'] == 1].shape[0]
+    mac = report_df[report_df['mac'] == 1].shape[0]
+    linux = report_df[report_df['linux'] == 1].shape[0]
+
+    st.write(f"Windows: {windows}")
+    st.write(f"Mac: {mac}")
+    st.write(f"linux: {linux}")
+
+
 def crash_simulation():
     # Add failure simulation toggle to the sidebar
     st.sidebar.header("Crash Simulation")
@@ -579,7 +614,7 @@ def main():
     # Add crash simulation options to the sidebar
     crash_simulation()
 
-    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete"])
+    page = st.sidebar.radio("Select Operation", ["Show", "Search", "Insert", "Update", "Delete", "Report"])
 
     if page == "Show":
         show()
@@ -591,6 +626,8 @@ def main():
         update()
     elif page == "Delete":
         delete()
+    elif page == "Report":
+        report()
 
     if node_status["Node 1"]:
         replicate_from_temp_logs_to_node_1()
