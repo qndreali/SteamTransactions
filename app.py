@@ -381,6 +381,14 @@ def insert():
                     backup_node = "Node 2" if year < 2010 else "Node 3"
                     log_transaction("INSERT_TEMP", backup_node, query, params)
                     st.info(f"Will replicate to {backup_node} once it comes back online")
+                else:
+                    backup_node = "Node 2" if year <= 2010 else "Node 3"
+                    cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
+                    conn = conn2 if backup_node == "Node 2" else conn3
+                    cursor.execute(query, params)
+                    conn.commit()
+                    log_transaction("INSERT", backup_node, query, params)
+                    st.success(f"Game successfully inserted into {backup_node}.")
             else:
                 # If Node 1 is down
                 backup_node = "Node 2" if year <= 2010 else "Node 3"
@@ -561,9 +569,18 @@ def update():
                             st.info(f"Data updated into Node 1.")
 
                             # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
-                            backup_node = "Node 2" if updated_year < 2010 else "Node 3"
-                            log_transaction("UPDATE_TEMP", backup_node, query_update, params_update)
-                            st.warning(f"Node {backup_node} is unavailable. Will replicate update to {backup_node} once it comes back online")
+                            if(node_status["Node 1"] and (node_status["Node 2"] == False or node_status["Node 3"]== False)):
+                                backup_node = "Node 2" if updated_year < 2010 else "Node 3"
+                                log_transaction("UPDATE_TEMP", backup_node, query_update, params_update)
+                                st.warning(f"Node {backup_node} is unavailable. Will replicate update to {backup_node} once it comes back online")
+                            else:    
+                                backup_node = "Node 2" if updated_year <=2010 else "Node 3"
+                                cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
+                                conn = conn2 if backup_node == "Node 2" else conn3
+                                cursor.execute(query_update, params_update)
+                                conn.commit()
+                                log_transaction("UPDATE", backup_node, query_update, params_update)
+                                st.success(f"Game successfully updated for {backup_node}.")
                         else:
                             backup_node = "Node 2" if updated_year <= 2010 else "Node 3"
                             cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
@@ -613,9 +630,19 @@ def delete():
                         st.success(f"Game successfully deleted from Node 1.")
 
                         # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
-                        backup_node = "Node 2" if year < 2010 else "Node 3"
-                        log_transaction("DELETE_TEMP", backup_node, query, params)
-                        st.info(f"Will delete from {backup_node} once it comes back online NEW")
+                        if(node_status["Node 1"] and (node_status["Node 2"] == False or node_status["Node 3"]== False)):
+                                backup_node = "Node 2" if year < 2010 else "Node 3"
+                                log_transaction("DELETE_TEMP", backup_node, query, params)
+                                st.info(f"Will delete from {backup_node} once it comes back online NEW")
+                        else:    
+                            backup_node = "Node 2" if int(year) <= 2010 else "Node 3"
+                            cursor = conn2_cursor if backup_node == "Node 2" else conn3_cursor
+                            conn = conn2 if backup_node == "Node 2" else conn3
+                            cursor.execute(query, params)
+                            conn.commit()
+                            log_transaction("DELETE", backup_node, query, params)
+                            st.success(f"Game successfully deleted from {backup_node}.")
+                        
                     else:
                         # Node 1 is unavailable, delete from backup node
                         backup_node = "Node 2" if int(year) <= 2010 else "Node 3"
@@ -717,7 +744,7 @@ def main():
     # Adjust the backup node based on the first selected node
     if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True and node_status["Node 3"] == True):
         return
-    if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
+    elif st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
         replicate_from_temp_logs_to_backup_node()
     elif (st.session_state.first_selected_node == "Node 2" or st.session_state.first_selected_node ==  "Node 3") and node_status["Node 1"] == True:
         replicate_from_temp_logs_to_node_1()
