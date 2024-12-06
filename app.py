@@ -229,7 +229,7 @@ def replicate_from_temp_logs_to_node_1():
 
                             conn1.commit()
                             log_transaction(action.replace("_TEMP", "_REPLICATED"), "Node 1", query, params)
-                            st.success(f"{action.replace('_TEMP', '')} operation replicated to Node 1 successfully.")
+                            st.success(f"{action.replace('_TEMP', '')} operation replicated to Node 1 successfully..")
                             break
                         except Exception as e:
                             attempt += 1
@@ -271,7 +271,12 @@ def replicate_from_temp_logs_to_backup_node():
                 node = entry["node"]
                 query = entry["query"]
                 params = entry["params"]
+                
+                release_date = entry["params"][2]
+                year = datetime.strptime(release_date, "%Y-%m-%d").year
 
+                if (year < 2010 and node_status['Node 2']== False or year >= 2010 and node_status['Node 3'] == False):
+                    return
                 if action.endswith("_TEMP"):
                     if st.session_state.get("simulate_failure_node_2or3", False):
                         if node == "Node 2":
@@ -742,10 +747,11 @@ def main():
         report()
 
     # Adjust the backup node based on the first selected node
-    if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True and node_status["Node 3"] == True):
-        return
-    elif st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
+    
+    if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
         replicate_from_temp_logs_to_backup_node()
+    elif st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True and node_status["Node 3"] == True):
+        return
     elif (st.session_state.first_selected_node == "Node 2" or st.session_state.first_selected_node ==  "Node 3") and node_status["Node 1"] == True:
         replicate_from_temp_logs_to_node_1()
 
