@@ -377,9 +377,10 @@ def insert():
                 st.info(f"Data inserted into Node 1.")
 
                 # Depending on the year, log for replication to the backup node (Node 2 or Node 3)
-                backup_node = "Node 2" if year < 2010 else "Node 3"
-                log_transaction("INSERT_TEMP", backup_node, query, params)
-                st.info(f"Will replicate to {backup_node} once it comes back online NEW")
+                if(node_status["Node 1"] and (node_status["Node 2"] == False or node_status["Node 3"]== False)):
+                    backup_node = "Node 2" if year < 2010 else "Node 3"
+                    log_transaction("INSERT_TEMP", backup_node, query, params)
+                    st.info(f"Will replicate to {backup_node} once it comes back online")
             else:
                 # If Node 1 is down
                 backup_node = "Node 2" if year <= 2010 else "Node 3"
@@ -714,6 +715,8 @@ def main():
         report()
 
     # Adjust the backup node based on the first selected node
+    if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True and node_status["Node 3"] == True):
+        return
     if st.session_state.first_selected_node == "Node 1" and (node_status["Node 2"] == True or node_status["Node 3"] == True):
         replicate_from_temp_logs_to_backup_node()
     elif (st.session_state.first_selected_node == "Node 2" or st.session_state.first_selected_node ==  "Node 3") and node_status["Node 1"] == True:
